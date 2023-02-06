@@ -253,7 +253,8 @@ final class HttpsClient extends HttpClient
         this.proxy = proxy;
         setSSLSocketFactory(sf);
         this.proxyDisabled = true;
-
+        System.err.println("HHHHHHHHHHHHHHHHHHHHHHHH");
+        Thread.dumpStack();
         this.host = url.getHost();
         this.url = url;
         port = url.getPort();

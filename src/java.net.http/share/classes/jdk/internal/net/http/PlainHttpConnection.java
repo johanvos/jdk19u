@@ -294,9 +294,11 @@ class PlainHttpConnection extends HttpConnection {
     final FlowTube getConnectionFlow() {
         return tube;
     }
-
     PlainHttpConnection(InetSocketAddress addr, HttpClientImpl client) {
-        super(addr, client);
+this (addr, client, null);
+    }
+    PlainHttpConnection(InetSocketAddress addr, HttpClientImpl client, HttpRequestImpl request) {
+        super(addr, client, request);
         try {
             this.chan = SocketChannel.open();
             chan.configureBlocking(false);

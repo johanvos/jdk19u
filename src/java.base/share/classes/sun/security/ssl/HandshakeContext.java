@@ -78,6 +78,8 @@ abstract class HandshakeContext implements ConnectionContext {
     final SSLContextImpl                    sslContext;
     final TransportContext                  conContext;
     final SSLConfiguration                  sslConfig;
+    ECHConfig                               echConfig;
+    HPKEContext                             hpkeContext;
 
     // consolidated parameters
     final List<ProtocolVersion>             activeProtocols;
@@ -124,6 +126,8 @@ abstract class HandshakeContext implements ConnectionContext {
     RandomCookie                            clientHelloRandom;
     RandomCookie                            serverHelloRandom;
     byte[]                                  certRequestContext;
+    byte[] innerClientHello; // if ECH is used
+    RandomCookie innerClientHelloRandom;
 
     ////////////////////
     // Extensions
@@ -157,6 +161,8 @@ abstract class HandshakeContext implements ConnectionContext {
 
     // OCSP Stapling info
     boolean                                 staplingActive = false;
+    boolean innerEch;
+
 
     protected HandshakeContext(SSLContextImpl sslContext,
             TransportContext conContext) throws IOException {
@@ -165,9 +171,11 @@ abstract class HandshakeContext implements ConnectionContext {
         this.sslConfig = (SSLConfiguration)conContext.sslConfig.clone();
         this.algorithmConstraints = SSLAlgorithmConstraints.wrap(
                 sslConfig.userSpecifiedAlgorithmConstraints);
-        this.activeProtocols = getActiveProtocols(sslConfig.enabledProtocols,
-                sslConfig.enabledCipherSuites, algorithmConstraints);
-        if (activeProtocols.isEmpty()) {
+//        this.activeProtocols = getActiveProtocols(sslConfig.enabledProtocols,
+//                sslConfig.enabledCipherSuites, algorithmConstraints);
+// [ECH] TODO check on ech 
+       this.activeProtocols = List.of(ProtocolVersion.TLS13);
+if (activeProtocols.isEmpty()) {
             throw new SSLHandshakeException(
                 "No appropriate protocol (protocol is disabled or " +
                 "cipher suites are inappropriate)");
@@ -352,6 +360,22 @@ abstract class HandshakeContext implements ConnectionContext {
         }
 
         return Collections.unmodifiableList(suites);
+    }
+
+    void setInnerEch(boolean v) {
+        this.innerEch = v;
+    }
+ 
+    boolean isInnerEch() {
+        return innerEch;
+    }
+    
+    void setEchConfig(ECHConfig ec) {
+        this.echConfig = ec;
+    }
+    
+    ECHConfig getEchConfig() {
+        return this.echConfig;
     }
 
     /**

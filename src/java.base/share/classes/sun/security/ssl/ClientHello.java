@@ -27,14 +27,19 @@ package sun.security.ssl;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.security.KeyPair;
+import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.text.MessageFormat;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HexFormat;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLHandshakeException;
 import javax.net.ssl.SSLPeerUnverifiedException;
@@ -47,8 +52,11 @@ import sun.security.ssl.SupportedVersionsExtension.CHSupportedVersionsSpec;
  * Pack of the ClientHello handshake message.
  */
 final class ClientHello {
-    static final SSLProducer kickstartProducer =
-        new ClientHelloKickstartProducer();
+
+    static final int OSSL_ECH_PADDING_TARGET = 256;
+    static final int OSSL_ECH_PADDING_INCREMENT = 32;
+    static final SSLProducer kickstartProducer
+            = new ClientHelloKickstartProducer();
     static final SSLConsumer handshakeConsumer =
         new ClientHelloConsumer();
     static final HandshakeProducer handshakeProducer =
@@ -79,13 +87,23 @@ final class ClientHello {
         final List<CipherSuite>     cipherSuites;   // known cipher suites only
         final byte[]                compressionMethod;
         final SSLExtensions         extensions;
+        boolean inner;
 
         private static final byte[]  NULL_COMPRESSION = new byte[] {0};
 
+        public Map<SSLExtension, byte[]> getExtensions() {
+            return extensions.getExtMap();
+        }
+
+        void setExtensions(Map<SSLExtension, byte[]> m) {
+            this.extensions.setExtMap(m);
+        }
+
         ClientHelloMessage(HandshakeContext handshakeContext,
                 int clientVersion, SessionId sessionId,
-                List<CipherSuite> cipherSuites, SecureRandom generator) {
+                List<CipherSuite> cipherSuites, SecureRandom generator, boolean inner) {
             super(handshakeContext);
+            this.inner = inner;
             this.isDTLS = handshakeContext.sslContext.isDTLS();
 
             this.clientVersion = clientVersion;
@@ -99,7 +117,7 @@ final class ClientHello {
 
             this.cipherSuites = cipherSuites;
             this.cipherSuiteIds = getCipherSuiteIds(cipherSuites);
-            this.extensions = new SSLExtensions(this);
+            this.extensions = new SSLExtensions(this, inner);
 
             // Don't support compression.
             this.compressionMethod = NULL_COMPRESSION;
@@ -329,6 +347,30 @@ final class ClientHello {
             hos.putBytes8(compressionMethod);
         }
 
+        public byte[] toByteArray() throws IOException {
+            byte[] hb = getHeaderBytes();
+            HandshakeOutStream hos = new HandshakeOutStream(null);
+            this.extensions.send(hos);
+            byte[] eb = hos.toByteArray();
+            byte[] answer = new byte[hb.length + eb.length];
+            System.arraycopy(hb, 0, answer, 0, hb.length);
+            System.arraycopy(eb, 0, answer, hb.length, eb.length);
+            return answer;
+        }
+
+        public byte[] getEncodedByteArray() throws IOException {
+            HandshakeOutStream hos = new HandshakeOutStream(null);
+            hos.putInt8((byte) ((clientVersion >>> 8) & 0xFF));
+            hos.putInt8((byte) (clientVersion & 0xFF));
+            hos.write(clientRandom.randomBytes, 0, 32);
+            hos.putInt8(0); // empty session id
+            hos.putBytes16(getEncodedCipherSuites());
+            hos.putBytes8(compressionMethod);
+            this.extensions.send(hos);
+            return hos.toByteArray();
+        }
+
+
         @Override
         public String toString() {
             if (isDTLS) {
@@ -388,6 +430,10 @@ final class ClientHello {
      */
     private static final
             class ClientHelloKickstartProducer implements SSLProducer {
+        
+        private ECHConfig echConfig;
+        private HPKEContext hpkeContext;
+        
         // Prevent instantiation of this class.
         private ClientHelloKickstartProducer() {
             // blank
@@ -396,10 +442,20 @@ final class ClientHello {
         // Produce kickstart handshake message.
         @Override
         public byte[] produce(ConnectionContext context) throws IOException {
-            System.err.println("[JVDBG] create ClientHello, context = " + context+", this = "+this);
-Thread.dumpStack();
             // The producing happens in client side only.
             ClientHandshakeContext chc = (ClientHandshakeContext)context;
+            String innerCh = chc.sslConfig.innerSNI;
+            if (innerCh != null) {
+                String echString = chc.sslConfig.echConfig;                
+                this.echConfig = new ECHConfig(HexFormat.of().parseHex(echString));
+                PublicKey peerPub = HPKEContext.convertEncodedPublicKey(echConfig.getPublicKey());
+                KeyPair ephemeral = HPKEContext.deriveKeyPair(null);
+                SSLLogger.info("mypublickey", ephemeral.getPublic());
+                this.hpkeContext = new HPKEContext(peerPub, ephemeral, this.echConfig.createInfo());
+                hpkeContext.create();
+                chc.hpkeContext = hpkeContext;
+                chc.innerSNI = innerCh;
+            }
             System.err.println("[JVDBG] in ClientHello, innerSNI  = "+chc.sslConfig.innerSNI+" for config = "+chc.sslConfig);
             // clean up this producer
             chc.handshakeProducers.remove(SSLHandshake.CLIENT_HELLO.id);
@@ -408,8 +464,10 @@ Thread.dumpStack();
             SessionId sessionId = new SessionId(new byte[0]);
 
             // a list of cipher suites sent by the client
-            List<CipherSuite> cipherSuites = chc.activeCipherSuites;
-
+            List<CipherSuite> ccipherSuites = chc.activeCipherSuites;
+            List<CipherSuite> cipherSuites = new ArrayList<>();
+            cipherSuites.addAll(ccipherSuites);
+            cipherSuites.add(CipherSuite.TLS_EMPTY_RENEGOTIATION_INFO_SCSV);
             //
             // Try to resume an existing session.
             //
@@ -628,8 +686,8 @@ Thread.dumpStack();
 
             ClientHelloMessage chm = new ClientHelloMessage(chc,
                     clientHelloVersion.id, sessionId, cipherSuites,
-                    chc.sslContext.getSecureRandom());
-
+                    chc.sslContext.getSecureRandom(), false);
+            chc.initialClientHelloMsg = chm;
             // cache the client random number for further using
             chc.clientHelloRandom = chm.clientRandom;
             chc.clientHelloVersion = clientHelloVersion.id;
@@ -637,10 +695,73 @@ Thread.dumpStack();
             // Produce extensions for ClientHello handshake message.
             SSLExtension[] extTypes = chc.sslConfig.getEnabledExtensions(
                     SSLHandshake.CLIENT_HELLO, chc.activeProtocols);
+            chc.setEchConfig(echConfig);
             chm.extensions.produce(chc, extTypes);
 
             if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
                 SSLLogger.fine("Produced ClientHello handshake message", chm);
+            }
+            
+// ========= inner ECH
+            if (this.echConfig != null) {
+                ClientHelloMessage innerChm = new ClientHelloMessage(chc,
+                        chc.clientHelloVersion, chm.sessionId, chm.cipherSuites,
+                        chc.sslContext.getSecureRandom(), true);
+                chc.setInnerEch(true);
+                chc.innerClientHelloMessage = innerChm;
+                chc.innerClientHelloRandom = innerChm.clientRandom;
+                innerChm.extensions.produce(chc, extTypes);
+
+                chc.setInnerEch(false);
+                byte[] innerCH = innerChm.toByteArray();
+                SSLLogger.info("inner CH", innerCH);
+                System.err.println("Initially, inner CH = " + HexFormat.ofDelimiter(":").formatHex(innerCH));
+                byte[] clear = innerChm.getEncodedByteArray();
+                SSLLogger.info("Before padding, clear (" + clear.length + ") = ", clear);
+                int clearLen = calculateClearLength(clear.length, echConfig.getMaxNameLength());
+                byte[] newclear = new byte[clearLen];
+                System.arraycopy(clear, 0, newclear, 0, clear.length);
+                clear = newclear;
+                SSLLogger.info("After padding, clear (" + clear.length + ") = ", clear);
+
+                byte[] pkt = chm.toByteArray();
+                SSLLogger.info("orignal packets (pkt)", pkt);
+                int cipherlen = clearLen + 16; // not valid for all AEAD
+                int echStart = pkt.length - 40;
+                pkt = expandOuterCH(pkt, (byte) this.echConfig.getConfigId(), hpkeContext.getEphemeralPublicKeyBytes(), cipherlen);
+                int echLength = pkt.length - echStart;
+                System.err.println("ECHStart at " + echStart + " and length = " + echLength);
+                SSLLogger.info("after expanding, pkt (" + pkt.length + ")", pkt);
+                byte[] aad = new byte[pkt.length];
+
+// set tmp extension so that we get correct size of extensions 
+                byte[] tmpCH = new byte[pkt.length - echStart];
+                System.arraycopy(pkt, echStart, tmpCH, 0, tmpCH.length);
+
+                chm.extensions.updateExtension(SSLExtension.CH_ECH, tmpCH);
+                pkt = chm.toByteArray();
+
+                System.err.println("Pktlen = " + pkt.length + ", aadlen = " + aad.length + ", cipherlen = " + cipherlen);
+                System.arraycopy(pkt, 0, aad, 0, aad.length);
+                // pkt and aad now have correct extensions size and are equal
+                // add first
+                SSLLogger.info("Before cipher calc, aad = (" + aad.length + ")", aad);
+                SSLLogger.info("Before cipher calc, clear = (" + clear.length + ")", clear);
+//          byte[] AAD = HexFormat.ofDelimiter(":").parseHex(someAadString);
+//          byte[] CLEAR = HexFormat.ofDelimiter(":").parseHex(someClearString);
+                byte[] cipher = hpkeContext.seal(aad, clear);
+
+                System.err.println("CIPHER = " + HexFormat.ofDelimiter(":").formatHex(cipher));
+                // now modify pkt (clientouter) so that it has the cipher instead of zeroes
+                // we do this by changing the ech extension and ask to recalculate (which is done when asking updateExtension and toByteArray)
+                byte[] newCH = new byte[echLength];
+                System.arraycopy(tmpCH, 0, newCH, 0, echLength);
+                System.arraycopy(cipher, 0, newCH, echLength - cipherlen, cipherlen);
+                chm.extensions.updateExtension(SSLExtension.CH_ECH, newCH);
+                chc.innerClientHello = innerChm.toByteArray();
+                SSLLogger.info("ClientHelloOuter = ", chm.toByteArray());
+
+                // ===========
             }
 
             // Output the handshake message.
@@ -663,6 +784,41 @@ Thread.dumpStack();
 
             // The handshake message has been delivered.
             return null;
+        }
+    
+        private int calculateClearLength(int il, int mnl) {
+            if (mnl > 0) {
+                System.err.println("WARNING, ECHCONFIG DEFINED MAXNAMELENGTH! not supported!");
+            }
+            int innersnipadding = 0;
+            int lengthWithSniPadding = innersnipadding + il;
+            int lengthOfPadding = 31 - ((lengthWithSniPadding - 1) % 32);
+            int lengthWithPadding = il + lengthOfPadding + innersnipadding;
+            while (lengthWithPadding < OSSL_ECH_PADDING_TARGET) {
+                lengthWithPadding += OSSL_ECH_PADDING_INCREMENT;
+            }
+            int clearLen = lengthWithPadding;
+            SSLLogger.info("EAAE: Padding: mnl " + echConfig.getMaxNameLength() + ", lws: " + lengthWithSniPadding
+                    + ",lop: " + lengthOfPadding + ", lwp: " + lengthWithPadding
+                    + ", clear_len: " + clearLen + ", orig: " + il);
+
+            return clearLen;
+        }
+
+        private byte[] expandOuterCH(byte[] src, byte cfgid, byte[] mypub, int cipherlen) {
+            System.err.println("expand, src size = " + src.length + ", cipherlen = " + cipherlen);
+            byte[] answer = new byte[src.length + 2 + cipherlen];
+            System.arraycopy(src, 0, answer, 0, src.length);
+            int ef0dlength = 1 + 4 + 1 + 2 + mypub.length + 2 + cipherlen;
+            int lengthloc = src.length - 42;
+            answer[lengthloc] = (byte) (ef0dlength / 256);
+            answer[lengthloc + 1] = (byte) (ef0dlength % 256);
+            int cipherloc = src.length;
+            answer[cipherloc] = (byte) (cipherlen / 256);
+            answer[cipherloc + 1] = (byte) (cipherlen % 256);
+            System.err.println("expanded into size = " + answer.length);
+
+            return answer;
         }
     }
 

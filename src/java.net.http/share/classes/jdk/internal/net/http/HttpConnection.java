@@ -79,7 +79,20 @@ abstract class HttpConnection implements Closeable {
     private final long id;
 
     HttpConnection(InetSocketAddress address, HttpClientImpl client) {
-        this.address = address;
+        this (address, client, null);
+    }
+    HttpConnection(InetSocketAddress address, HttpClientImpl client, HttpRequestImpl req) {
+           String outerHost = System.getProperty("ech.outer"); 
+         //  if (outerHost != null) {
+         //      String h = outerHost;
+        if ((req != null) && (req.headers().firstValue("outerSNI").isPresent())){
+            String h = req.headers().firstValue("outerSNI").get();
+            this.address = new InetSocketAddress(h, address.getPort());
+        } else {
+            this.address = address;
+        }
+        System.err.println("HTTTTTTTP, address = "+this.address+", req = "+req);
+        Thread.dumpStack();
         this.client = client;
         trailingOperations = new TrailingOperations();
         this.id = newConnectionId(client);

@@ -303,7 +303,7 @@ abstract class HttpConnection implements Closeable {
             return new AsyncSSLTunnelConnection(addr, client, alpn, proxy,
                                                 proxyTunnelHeaders(request));
         else
-            return new AsyncSSLConnection(addr, client, alpn);
+            return new AsyncSSLConnection(addr, client, alpn, request);
     }
 
     /**

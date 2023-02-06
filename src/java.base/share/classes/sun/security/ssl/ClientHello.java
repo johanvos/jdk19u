@@ -396,9 +396,11 @@ final class ClientHello {
         // Produce kickstart handshake message.
         @Override
         public byte[] produce(ConnectionContext context) throws IOException {
+            System.err.println("[JVDBG] create ClientHello, context = " + context+", this = "+this);
+Thread.dumpStack();
             // The producing happens in client side only.
             ClientHandshakeContext chc = (ClientHandshakeContext)context;
-
+            System.err.println("[JVDBG] in ClientHello, innerSNI  = "+chc.sslConfig.innerSNI+" for config = "+chc.sslConfig);
             // clean up this producer
             chc.handshakeProducers.remove(SSLHandshake.CLIENT_HELLO.id);
 

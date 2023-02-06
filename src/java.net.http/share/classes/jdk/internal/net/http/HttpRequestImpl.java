@@ -383,11 +383,18 @@ public class HttpRequestImpl extends HttpRequest implements WebSocketRequest {
                 p = 80;
             }
         }
-        final String host = uri.getHost();
+        String host = uri.getHost();
+if (host.equals("chat.signal.org")) {
+host="chat.gluonhq.net";
+}
+final String myhost = host;
         final int port = p;
         if (proxy() == null) {
-            PrivilegedAction<InetSocketAddress> pa = () -> new InetSocketAddress(host, port);
-            return AccessController.doPrivileged(pa);
+            PrivilegedAction<InetSocketAddress> pa = () -> new InetSocketAddress(myhost, port);
+            InetSocketAddress answer = AccessController.doPrivileged(pa);
+System.err.println("[JVDBG] need to connect to " + myhost+", address = " + answer);
+Thread.dumpStack();
+            return answer;
         } else {
             return InetSocketAddress.createUnresolved(host, port);
         }

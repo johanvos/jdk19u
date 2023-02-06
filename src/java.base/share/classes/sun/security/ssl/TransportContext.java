@@ -147,7 +147,6 @@ final class TransportContext implements ConnectionContext {
             this.sslConfig.maximumPacketSize = outputRecord.getMaxPacketSize();
         }
         this.isUnsureMode = isUnsureMode;
-
         // initial security parameters
         this.conSession = new SSLSessionImpl();
         this.protocolVersion = this.sslConfig.maximumProtocolVersion;

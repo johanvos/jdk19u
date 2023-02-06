@@ -207,7 +207,10 @@ class PlainHttpConnection extends HttpConnection {
             PrivilegedExceptionAction<Boolean> pa =
                     () -> chan.connect(Utils.resolveAddress(address));
             try {
+                System.err.println("REALLY CREATE SOCKET NOW TO "+address);
+                Thread.dumpStack();
                  finished = AccessController.doPrivileged(pa);
+                System.err.println("DID CREATE SOCKET NOW TO "+address);
             } catch (PrivilegedActionException e) {
                throw e.getCause();
             }

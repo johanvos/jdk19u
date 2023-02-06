@@ -86,6 +86,9 @@ public class SSLParameters {
     private String[] applicationProtocols = new String[0];
     private String[] signatureSchemes = null;
 
+    String innerSNI;
+    String echConfig;
+
     /**
      * Constructs SSLParameters.
      * <p>
@@ -810,4 +813,41 @@ public class SSLParameters {
 
         this.signatureSchemes = tempSchemes;
     }
+
+    /**
+     * return the inner SNI, if available
+     *
+     * @return inner SNI
+     */
+    public String getInnerSNI() {
+        return this.innerSNI;
+    }
+
+    /**
+     * Set the inner SNI
+     *
+     * @param is the inner SNI
+     */
+    public void setInnerSNI(String is) {
+        this.innerSNI = is;
+    }
+
+    /**
+     * get the ECHConfig
+     *
+     * @return the echConfig
+     */
+    public String getEchConfig() {
+        return echConfig;
+    }
+
+    /**
+     * set the ech config
+     *
+     * @param echConfig the echConfig
+     */
+    public void setEchConfig(String echConfig) {
+        this.echConfig = echConfig;
+    }
+
 }

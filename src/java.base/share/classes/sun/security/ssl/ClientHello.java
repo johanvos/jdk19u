@@ -446,6 +446,7 @@ final class ClientHello {
             ClientHandshakeContext chc = (ClientHandshakeContext)context;
             String innerCh = chc.sslConfig.innerSNI;
             if (innerCh != null) {
+                System.err.println("INNERCH = "+innerCh);
                 String echString = chc.sslConfig.echConfig;                
                 this.echConfig = new ECHConfig(HexFormat.of().parseHex(echString));
                 PublicKey peerPub = HPKEContext.convertEncodedPublicKey(echConfig.getPublicKey());
@@ -476,6 +477,8 @@ final class ClientHello {
             SSLSessionImpl session = ssci.get(
                     chc.conContext.transport.getPeerHost(),
                     chc.conContext.transport.getPeerPort());
+            System.err.println("[ClientHello] session was "+session);
+            session = null;
             if (session != null) {
                 // If unsafe server certificate change is not allowed, reserve
                 // current server certificates if the previous handshake is a

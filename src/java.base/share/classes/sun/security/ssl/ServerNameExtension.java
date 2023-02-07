@@ -224,18 +224,24 @@ final class ServerNameExtension {
 
             // Produce the extension.
             List<SNIServerName> serverNames;
-            if (chc.isResumption && (chc.resumingSession != null)) {
+System.err.println("[JVDBG] ServerNameExtension, process with chc = " + chc+" and innerchc? " + chc.isInnerEch());
+            String ehidden = chc.innerSNI;
+            System.err.println("resumption? "+ chc.isResumption+" resumingsession? "+chc.resumingSession);
+            if (chc.isResumption && (chc.resumingSession != null) && (ehidden == null)) {
+System.err.println("[JVDBG] ServerNameExtension1, resuming!!");
                 serverNames =
                         chc.resumingSession.getRequestedServerNames();
             } else {
-                 String ehidden = chc.innerSNI;
+System.err.println("[JVDBG] ServerNameExtension2, ehidden = " + ehidden);
                 if (ehidden == null) {
                     serverNames = chc.sslConfig.serverNames;
                 } else {
                     if (chc.isInnerEch()) {
                         serverNames = List.of(new SNIHostName(ehidden));
+System.err.println("[JVDBG] ServerNameExtension3, name = " + ehidden);
                     } else {
                         String hname = chc.getEchConfig().getPublicName();
+System.err.println("[JVDBG] ServerNameExtension4, name = " + hname);
                         serverNames = List.of(new SNIHostName(hname));
                     }
                 }

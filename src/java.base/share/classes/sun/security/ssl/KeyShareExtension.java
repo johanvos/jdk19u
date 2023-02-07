@@ -262,7 +262,7 @@ final class KeyShareExtension {
                         keyShares.add(new KeyShareEntry(ng.id,
                                 keyExchangeData));
                         ngTypes.add(ng.spec);
-                        if (ngTypes.size() == 2) {
+                        if (ngTypes.size() == 1) {
                             break;
                         }
                     }
@@ -289,6 +289,10 @@ final class KeyShareExtension {
 
         private static byte[] getShare(ClientHandshakeContext chc,
                 NamedGroup ng) {
+            if (chc.innerEch) {
+                SSLPossession existing = chc.handshakePossessions.get(0);
+                return existing.encode();
+            }
             SSLKeyExchange ke = SSLKeyExchange.valueOf(ng);
             if (ke == null) {
                 if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {

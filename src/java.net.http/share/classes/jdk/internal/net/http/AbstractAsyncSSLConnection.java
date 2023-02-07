@@ -72,10 +72,17 @@ abstract class AbstractAsyncSSLConnection extends HttpConnection
                                HttpClientImpl client,
                                ServerName serverName, int port,
                                String[] alpn) {
-        super(addr, client);
+        this (addr, client, serverName, port, alpn, null);
+    }
+    AbstractAsyncSSLConnection(InetSocketAddress addr,
+                               HttpClientImpl client,
+                               ServerName serverName, int port,
+                               String[] alpn,
+                               HttpRequestImpl request) {
+        super(addr, client, request);
         this.serverName = serverName.getName();
         SSLContext context = client.theSSLContext();
-        sslParameters = createSSLParameters(client, serverName, alpn);
+        sslParameters = createSSLParameters(client, serverName, alpn, request);
         Log.logParams(sslParameters);
         engine = createEngine(context, serverName.getName(), port, sslParameters);
     }
@@ -97,9 +104,13 @@ abstract class AbstractAsyncSSLConnection extends HttpConnection
 
     private static SSLParameters createSSLParameters(HttpClientImpl client,
                                                      ServerName serverName,
-                                                     String[] alpn) {
+                                                     String[] alpn,
+                                                     HttpRequestImpl req) {
         SSLParameters sslp = client.sslParameters();
         SSLParameters sslParameters = Utils.copySSLParameters(sslp);
+        req.headers().firstValue("innerSNI").ifPresent(inner -> sslParameters.setInnerSNI(inner) );
+        req.headers().firstValue("echConfig").ifPresent(echs -> sslParameters.setEchConfig(echs) );
+
         // filter out unwanted protocols, if h2 only
         if (alpn != null && alpn.length != 0 && !contains(alpn, "http/1.1")) {
             ArrayDeque<String> l = new ArrayDeque<>();

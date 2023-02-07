@@ -30,6 +30,9 @@ import java.nio.ByteBuffer;
 import java.security.AlgorithmConstraints;
 import java.security.CryptoPrimitive;
 import java.security.GeneralSecurityException;
+import java.security.InvalidKeyException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.text.MessageFormat;
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -40,6 +43,7 @@ import java.util.Locale;
 import java.util.Map;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.IvParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLHandshakeException;
 import javax.net.ssl.SSLProtocolException;
@@ -869,7 +873,44 @@ final class ServerHello {
         public void consume(ConnectionContext context,
                 ByteBuffer message) throws IOException {
             // The consuming happens in client side only.
-            ClientHandshakeContext chc = (ClientHandshakeContext)context;
+            ClientHandshakeContext chc = (ClientHandshakeContext) context;
+
+            if (chc.echConfig != null) {
+
+                byte[] chBytes0 = chc.innerClientHello;
+                int csize = chBytes0.length;
+                byte[] chBytes = new byte[csize + 4];
+                chBytes[0] = 0x01;
+                chBytes[1] = (byte) (csize >> 16);
+                chBytes[2] = (byte) (csize >> 8);
+                chBytes[3] = (byte) (csize);
+                System.arraycopy(chBytes0, 0, chBytes, 4, csize);
+                ByteBuffer dup = message.duplicate();
+                int size = dup.remaining();
+                byte[] shBytes = new byte[size + 4];
+                shBytes[0] = 0x02;
+                shBytes[1] = (byte) (size >> 16);
+                shBytes[2] = (byte) (size >> 8);
+                shBytes[3] = (byte) (size);
+                dup.get(shBytes, 4, size);
+                boolean echOK = checkAcceptConfirmation(chBytes, shBytes);
+                System.err.println("ServerHello processes ECH request, did it work? " + echOK);
+                SSLLogger.info("SERVERHELLO accepted us? " + echOK);
+                if (echOK) {
+                    byte[] last = chc.handshakeHash.removeLastReceived();
+                    chc.handshakeHash.finish();
+                    chc.clientHelloRandom = chc.innerClientHelloRandom;
+                    chc.initialClientHelloMsg = chc.innerClientHelloMessage;
+
+                    HandshakeOutStream myhos = new HandshakeOutStream(null);
+                    myhos.write(chc.innerClientHelloMessage.handshakeType().id);
+                    myhos.putInt24(chc.innerClientHelloMessage.messageLength());
+
+                    chc.innerClientHelloMessage.send(myhos);
+                    chc.handshakeHash.receive(myhos.toByteArray());
+                    chc.handshakeHash.receive(last);
+                }
+            }
 
             // clean up this consumer
             chc.handshakeConsumers.remove(SSLHandshake.SERVER_HELLO.id);
@@ -1013,6 +1054,61 @@ final class ServerHello {
                 }
             }
         }
+            boolean checkAcceptConfirmation(byte[] chBytes, byte[] shBytes) throws IOException {
+            try {
+                SSLLogger.info("Check accept, clientHello = ", chBytes);
+                SSLLogger.info("Check accept, serverHello = ", shBytes);
+ // create tbuf
+                int chLen = chBytes.length;
+                int shLen = shBytes.length;
+                byte[] tbuf = new byte[chLen + shLen]; 
+                System.arraycopy(chBytes, 0, tbuf, 0, chLen); 
+                System.arraycopy(shBytes, 0, tbuf, chLen, shLen); 
+                // add zeros over last 8 bytes of serverHello.Random
+                int shoffset = 6 + 24; 
+                for (int i = 0; i < 8; i++) {
+                    tbuf[chLen + shoffset + i] = 0; 
+                }
+                // calculate message digest
+                MessageDigest md = MessageDigest.getInstance("SHA-384");
+                byte[] data = md.digest(tbuf);
+
+                // extract based on client.random bytes
+                byte[] rndBytes = new byte[32];
+                System.arraycopy(chBytes, 6, rndBytes, 0, 32); 
+                SecretKey inputKey = new SecretKeySpec(rndBytes, "KDF-PRK");
+                byte[] salt = new byte[48];
+                HKDF hkdfExtract = new HKDF("SHA-384");
+                SecretKey extract = hkdfExtract.extract(salt, inputKey, "KDF-OKM");
+                byte[] secret = extract.getEncoded();
+
+                // expand
+                byte[] label = "ech accept confirmation".getBytes();
+
+                HKDF hkdf = new HKDF("SHA-384");
+                byte[] prefixLabel = "tls13 ".getBytes();
+                    byte[] realLabel = new byte[4 + prefixLabel.length + label.length + data.length];
+                realLabel[0] = 0;
+                realLabel[1] = 8;
+                realLabel[2] = (byte) (label.length + prefixLabel.length);
+                System.arraycopy(prefixLabel, 0, realLabel, 3, prefixLabel.length);
+                System.arraycopy(label, 0, realLabel, 3 + prefixLabel.length, label.length);
+                int idx = 3 + label.length + prefixLabel.length;
+                realLabel[idx] = (byte) data.length;
+                idx++;
+                System.arraycopy(data, 0, realLabel, idx, data.length);
+                SecretKey prk = new SecretKeySpec(secret, "prk");
+                SecretKey res = hkdf.expand(prk, realLabel, 8, "SHA2-384");
+
+                byte[] expected = new byte[8];
+                System.arraycopy(shBytes, 30, expected, 0, 8);
+                boolean works = Arrays.equals(expected, res.getEncoded());
+                return works;
+            } catch (NoSuchAlgorithmException | InvalidKeyException ex) {
+                throw new IOException(ex);
+            }
+        }
+
     }
 
     private static final

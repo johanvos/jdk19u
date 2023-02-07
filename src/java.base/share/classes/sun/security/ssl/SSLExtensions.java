@@ -40,12 +40,18 @@ final class SSLExtensions {
     private final HandshakeMessage handshakeMessage;
     private final Map<SSLExtension, byte[]> extMap = new LinkedHashMap<>();
     private int encodedLength;
-
+    private boolean inner = false;
     // Extension map for debug logging
     private final Map<Integer, byte[]> logMap =
             SSLLogger.isOn ? new LinkedHashMap<>() : null;
 
     SSLExtensions(HandshakeMessage handshakeMessage) {
+        this.handshakeMessage = handshakeMessage;
+        this.encodedLength = 2;         // 2: the length of the extensions.
+    }
+
+    SSLExtensions(HandshakeMessage handshakeMessage, boolean inner) {
+        this.inner = inner;
         this.handshakeMessage = handshakeMessage;
         this.encodedLength = 2;         // 2: the length of the extensions.
     }
@@ -159,6 +165,19 @@ final class SSLExtensions {
         }
     }
 
+    Map<SSLExtension, byte[]> getExtMap() {
+        return this.extMap;
+    }
+
+    void setLength(int l) {
+        this.encodedLength = l;
+    }
+
+    void setExtMap(Map<SSLExtension, byte[]> m) {
+        extMap.clear();
+        extMap.putAll(m);
+    }
+
     byte[] get(SSLExtension ext) {
         return extMap.get(ext);
     }
@@ -204,6 +223,13 @@ final class SSLExtensions {
                 SSLLogger.fine("Consumed extension: " + extension.name);
             }
         }
+    }
+
+    void updateExtension(SSLExtension extension, byte[] val) {
+        SSLLogger.info("Asked to update extension " + extension + " to this value: ", val);
+        byte[] old = extMap.get(extension);
+        extMap.put(extension, val);
+        this.encodedLength = this.encodedLength + val.length - old.length;
     }
 
     /**
@@ -317,7 +343,7 @@ final class SSLExtensions {
 
     // Note that TLS 1.3 may use empty extensions.  Please consider it while
     // using this method.
-    int length() {
+    public int length() {
         if (extMap.isEmpty()) {
             return 0;
         } else {

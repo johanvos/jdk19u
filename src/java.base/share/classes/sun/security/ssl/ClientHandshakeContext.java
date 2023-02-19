@@ -97,6 +97,8 @@ class ClientHandshakeContext extends HandshakeContext {
 
     // PSK identity is selected in first Hello and used again after HRR
     byte[] pskIdentity;
+    ClientHelloMessage innerClientHelloMessage; // needed when we swap outer/inner
+    String innerSNI;
 
     ClientHandshakeContext(SSLContextImpl sslContext,
             TransportContext conContext) throws IOException {

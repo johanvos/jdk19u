@@ -71,6 +71,10 @@ final class SSLConfiguration implements Cloneable {
     boolean                     isClientMode;
     boolean                     enableSessionCreation;
 
+    // ECH Config
+    String innerSNI;
+    String echConfig;
+
     // the application layer protocol negotiation configuration
     BiFunction<SSLSocket, List<String>, String> socketAPSelector;
     BiFunction<SSLEngine, List<String>, String> engineAPSelector;
@@ -209,6 +213,12 @@ final class SSLConfiguration implements Cloneable {
     }
 
     void setSSLParameters(SSLParameters params) {
+        if (params.getInnerSNI() != null) {
+            this.innerSNI = params.getInnerSNI();
+        }
+        if (params.getEchConfig() != null) {
+            this.echConfig = params.getEchConfig();
+        }
         AlgorithmConstraints ac = params.getAlgorithmConstraints();
         if (ac != null) {
             this.userSpecifiedAlgorithmConstraints = ac;

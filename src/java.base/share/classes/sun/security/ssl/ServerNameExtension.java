@@ -224,12 +224,22 @@ final class ServerNameExtension {
 
             // Produce the extension.
             List<SNIServerName> serverNames;
-            if (chc.isResumption && (chc.resumingSession != null)) {
+            String ehidden = chc.innerSNI;
+            if (chc.isResumption && (chc.resumingSession != null) && (ehidden == null)) {
                 serverNames =
                         chc.resumingSession.getRequestedServerNames();
             } else {
-                serverNames = chc.sslConfig.serverNames;
-            }   // Shall we use host too?
+                if (ehidden == null) {
+                    serverNames = chc.sslConfig.serverNames;
+                } else {
+                    if (chc.isInnerEch()) {
+                        serverNames = List.of(new SNIHostName(ehidden));
+                    } else {
+                        String hname = chc.getEchConfig().getPublicName();
+                        serverNames = List.of(new SNIHostName(hname));
+                    }
+                }
+            }
 
             // Empty server name list is not allowed in client mode.
             if ((serverNames != null) && !serverNames.isEmpty()) {
